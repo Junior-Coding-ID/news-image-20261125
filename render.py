@@ -1,42 +1,34 @@
 #!/usr/bin/env python3
-"""Render THE GLOBAL BRIEF — 25 November 2026 (news-image-20261125 v2).
+"""Render THE GLOBAL BRIEF — Wednesday 25 November 2026 (news-image-20261125 v3).
 
-Draws a 1024x1024 editorial briefing board from the verified 25 Nov 2026
-stories in research-25nov-strict.md. Pure PIL, no network, deterministic.
-Only figures present in the strict research file are shown; unverified
-numbers from the v1 design brief ("3rd Tiangong trip", housing/electricity/
-fuel micro-labels, "Ocean freight +120.4%") are deliberately left out.
+36 dated stories, 6 regions, UTC timeline, 12 drawn pictogram scenes,
+mini world map, how-sure labels, DATE CHECK footer.
+Pure PIL, no network, deterministic. All stories from
+research-25nov-v3.md (verified 25 Nov 2026 only); nothing from 24 Nov
+or earlier is drawn.
 """
 import os
 from PIL import Image, ImageDraw, ImageFont
 
 W = H = 1024
-MARGIN = 24
-GUTTER = 12
+MARGIN = 16
 
-# palette
 BG = (244, 247, 251)
 INK = (17, 24, 39)
 MUTED = (71, 85, 105)
 FAINT = (100, 116, 139)
-LINE = (215, 223, 234)
+LINE = (203, 213, 225)
 NAVY = (15, 23, 42)
-NAVY_SOFT = (30, 41, 59)
 WHITE = (255, 255, 255)
 CREAM = (255, 251, 235)
 BLUE = (37, 99, 235)
 RED = (220, 38, 38)
-RED_SOFT = (254, 226, 226)
-AMBER = (245, 158, 11)
-AMBER_DARK = (180, 83, 9)
+AMBER = (217, 119, 6)
 PURPLE = (124, 58, 237)
-PURPLE_SOFT = (237, 233, 254)
-TEAL = (15, 118, 110)
-TEAL_SOFT = (204, 251, 241)
+TEAL = (13, 148, 136)
 ORANGE = (234, 88, 12)
 GREEN = (22, 163, 74)
-GREEN_SOFT = (220, 252, 231)
-GRAY = (148, 163, 184)
+YELLOW = (251, 191, 36)
 
 FB = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 FR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
@@ -46,250 +38,446 @@ def font(path, size):
     return ImageFont.truetype(path, size)
 
 
-def wrap(draw, text, fnt, max_w):
-    words = text.split()
-    lines, cur = [], ""
-    for w in words:
-        t = (cur + " " + w).strip()
-        if draw.textlength(t, font=fnt) <= max_w:
-            cur = t
-        else:
-            if cur:
-                lines.append(cur)
-            cur = w
-    if cur:
-        lines.append(cur)
-    return lines
+# (number, region_index, title, detail, how_sure)
+# how_sure: ✓ verified 2+ sources | ◐ single source | ? unconfirmed | → scheduled
+STORIES = [
+    # R1 — SPACE & SCIENCE
+    (1, 0, "SHENZHOU-24 LAUNCH",
+     "00:18 UTC, Jiuquan; first Pakistani in orbit, first foreigner to Tiangong", "✓"),
+    (2, 0, "SHENZHOU-24 DOCKS",
+     "Docked with Tiangong hours after launch, Wednesday morning", "✓"),
+    (3, 0, "HERA REVEAL TONIGHT",
+     "ESA first Dimorphos close-ups, 19:45 CET livestream from Berlin", "→"),
+    # R2 — MIDDLE EAST & GULF
+    (4, 1, "HORMUZ TANKERS BURN",
+     "IRGC: two oil tankers hit by sea mines, exploded and burned", "✓"),
+    (5, 1, 'IRAN: "NOT WORRIED"',
+     "VP Aref: no worry over US sea blockade; new surveillance in strait", "✓"),
+    (6, 1, "RAS TANURA HIT?",
+     "Houthis claim refinery strike, fire; coalition: 4 drones downed", "?"),
+    (7, 1, "GAZA: HAMAS COLONEL KILLED",
+     "Israeli strike kills Col. Abuelouf, wife + 2 children, Beach camp", "✓"),
+    # R3 — RUSSIA–UKRAINE & EUROPE
+    (8, 2, "REFINERIES ABLAZE",
+     "Ukraine drones hit Rosneft Syzran & Kuibyshev refineries; both on fire, 1 dead", "✓"),
+    (9, 2, "ODESA STRIKE",
+     "Russian strike: 2 dead, 3 hurt incl. child; Kyiv apartment fire, 2 hurt", "✓"),
+    (10, 2, "490,334 RUSSIAN DEAD",
+     "BBC analysis of leaked Russian govt death data: 490,334+ soldiers since 2022", "✓"),
+    (11, 2, "LIBYA VOWS REVENGE",
+     "Libyan army vows revenge on Ukraine; 2 navy officers killed in Benghazi drone hit", "✓"),
+    (12, 2, 'ITALY: "WRONG"',
+     "FM Tajani: Ukraine wrong to hit Russian ship off Libya; warns against wider war", "✓"),
+    (13, 2, "POLAND WANTS US TROOPS",
+     "Poland pushes permanent US military presence after 2 airspace violations", "✓"),
+    (14, 2, 'MERZ: RUSSIA "ESCALATING"',
+     "Chancellor Merz accuses Russia of escalating threats to European security", "✓"),
+    (15, 2, "GERMANY MEETS ON US PULLBACK",
+     "Senior defence officials meet today on US military pullback from Europe", "◐"),
+    (16, 2, "GERMANY GDP +0.1%",
+     "Q3 GDP +0.1% QoQ (revised down from 0.2%), +1.1% YoY; exports -1.0%", "✓"),
+    # R4 — ASIA–PACIFIC
+    (17, 3, "AUSTRALIA CPI 4.9%",
+     "CPI +4.9% YoY to Oct (from 4.3%); trimmed mean 3.8%; power +25.2%, fuel +32.5%", "✓"),
+    (18, 3, "JAPAN SERVICES +4.2%",
+     "Services PPI +4.2% YoY Oct, fastest since 1990; sea freight +120.4%", "✓"),
+    (19, 3, "ASIA ROUT",
+     "KOSPI -6.16% (Samsung -9.9%, SK Hynix -11.1%); Nikkei -2.78%; Taiwan ~-5%", "✓"),
+    (20, 3, "SOLOMONS TREATY",
+     "Solomons & Australia sign treaty: no foreign military bases; 2022 China pact not renewed", "✓"),
+    (21, 3, "N. KOREA EXPELS SWISS",
+     "Pyongyang orders Swiss diplomat Sylvain Astier out in 48 hours, office shut", "✓"),
+    (22, 3, "QUAKE M5.9",
+     "M5.9 Balleny Islands, Southern Ocean, 01:38 UTC, 10 km deep; USGS green alert", "✓"),
+    (23, 3, "QUAKE M5.1",
+     "M5.1 Antique, Philippines, 06:29 WIB; Intensity V in Valderrama; damage expected", "◐"),
+    (24, 3, "STOKES TO IPL",
+     "Ben Stokes enters IPL 2027 mini-auction at top base price", "✓"),
+    # R5 — AMERICAS & US ECONOMY
+    (25, 4, "US PCE 3.8%",
+     "PCE inflation 3.8% YoY, core 3.3% (highest since Nov 2023); Oct data, 08:30 ET", "✓"),
+    (26, 4, "US GDP 4.3%",
+     "Q3 GDP revised up to 4.3% (from 3.4%); durable goods +0.2%; income +0.7%", "✓"),
+    (27, 4, "DELL RECORD",
+     "Dell Q3 revenue $54.9bn (+103% YoY); AI servers $22.0bn (+291%)", "✓"),
+    (28, 4, "TUNGSTEN $2.45BN",
+     "US signs tungsten contracts worth up to $2.45bn as foreign-source ban takes effect", "✓"),
+    (29, 4, "USTR TARIFFS SOON",
+     "USTR to announce tariff hikes on China, EU + 14 others after subsidy probe", "◐"),
+    (30, 4, "ECUADOR OPS PAUSED",
+     "Trump admin pauses joint military ops with Ecuador (paused since mid-Oct)", "◐"),
+    (31, 4, "ABREGO GARCIA LEAVES",
+     "Kilmar Abrego Garcia voluntarily leaves US for Spain; DHS: self-deported", "✓"),
+    (32, 4, "AI TOO POWERFUL?",
+     "Anthropic & OpenAI staff: unreleased internal models too powerful to release safely", "◐"),
+    # R6 — AFRICA, ENERGY & WORLD
+    (33, 5, "SUDAN: 19 KILLED",
+     "RSF drone strikes kill 19 civilians incl. 6 women in Damazin & Roseires; 20 hurt", "✓"),
+    (34, 5, "POPE ON COP31",
+     "Pope Leo XIV dismayed COP31 failed to reach a deal; extreme weather more frequent", "✓"),
+    (35, 5, "OIL",
+     "Brent $90.96 (-0.5%), WTI $81.54 (-0.62%); Goldman raises 2027 outlook", "✓"),
+    (36, 5, "CARTAGENA FREED",
+     "Colombia forces storm Éxito supermarket in Cartagena, free all remaining hostages", "✓"),
+]
+
+REGIONS = [
+    ("R1  SPACE & SCIENCE", PURPLE, 3),
+    ("R2  MIDDLE EAST & GULF", RED, 4),
+    ("R3  RUSSIA–UKRAINE & EUROPE", BLUE, 9),
+    ("R4  ASIA–PACIFIC", TEAL, 8),
+    ("R5  AMERICAS & US ECONOMY", ORANGE, 8),
+    ("R6  AFRICA, ENERGY & WORLD", GREEN, 4),
+]
+
+# (hour_utc, label) for the timeline strip
+TIMELINE = [
+    (0.30, "00:18  SHENZHOU LAUNCH"),
+    (0.50, "00:30  AUS CPI 4.9%"),
+    (1.63, "01:38  BALLENY M5.9"),
+    (7.00, "07:00  GERMAN GDP"),
+    (13.50, "13:30  US PCE + GDP"),
+    (18.75, "18:45  HERA REVEAL"),
+]
+
+# 12 drawn scenes: (story_no, kind) — kind selects the pictogram drawer
+SCENES = [
+    (1, "rocket"), (4, "tanker"), (8, "refinery"), (14, "parliament"),
+    (19, "chartdown"), (20, "handshake"), (3, "asteroid"), (25, "dollar"),
+    (27, "chip"), (22, "globe"), (36, "shield"), (33, "drone"),
+]
 
 
-def text_block(draw, x, y, text, fnt, color, max_w, leading=None):
-    """Draw wrapped text; return y just below the last line."""
-    lines = wrap(draw, text, fnt, max_w)
-    lh = leading or int(fnt.size * 1.28)
-    for ln in lines:
-        draw.text((x, y), ln, font=fnt, fill=color)
-        y += lh
+def fit_text(draw, text, fnt, max_w):
+    """Truncate text with an ellipsis so it fits max_w."""
+    if draw.textlength(text, font=fnt) <= max_w:
+        return text
+    while len(text) > 4 and draw.textlength(text + "…", font=fnt) > max_w:
+        text = text[:-1]
+    return text + "…"
+
+
+def draw_header(draw):
+    draw.rectangle([0, 0, W, 88], fill=NAVY)
+    draw.text((MARGIN, 8), "THE GLOBAL BRIEF",
+              font=font(FB, 34), fill=WHITE)
+    pill = "WEDNESDAY  •  25 NOVEMBER 2026"
+    pf = font(FB, 16)
+    pw = int(draw.textlength(pill, font=pf)) + 28
+    px = W - MARGIN - pw
+    draw.rounded_rectangle([px, 14, W - MARGIN, 14 + 34], radius=17, fill=WHITE)
+    draw.text((px + 14, 22), pill, font=pf, fill=NAVY)
+    draw.text((MARGIN, 48),
+              "36 dated stories  •  6 regions  •  all events 25 Nov 2026 (any timezone)",
+              font=font(FB, 15), fill=(203, 213, 225))
+    draw.text((MARGIN, 68),
+              "HOW SURE:   ✓ verified (2+ sources)      ◐ single source      ? unconfirmed claim      → scheduled tonight",
+              font=font(FR, 12), fill=(148, 163, 184))
+
+
+def draw_timeline(draw):
+    y0, y1 = 92, 146
+    draw.rectangle([0, y0, W, y1], fill=WHITE)
+    draw.line([0, y1, W, y1], fill=LINE, width=1)
+    axis_y = y0 + 38
+    x0, x1 = MARGIN + 8, W - MARGIN - 8
+    draw.line([x0, axis_y, x1, axis_y], fill=INK, width=2)
+    for h in range(0, 25, 3):
+        tx = x0 + (x1 - x0) * h / 24.0
+        draw.line([tx, axis_y - 4, tx, axis_y + 4], fill=INK, width=2)
+        lab = "%02d:00" % h
+        lw = draw.textlength(lab, font=font(FR, 9))
+        draw.text((tx - lw / 2, axis_y + 7), lab, font=font(FR, 9), fill=FAINT)
+    # Three rows above the axis: the 00:18 / 00:30 / 01:38 cluster is only
+    # ~66 px wide, so the three early labels must stack vertically.
+    rows = [y0 + 2, y0 + 14, y0 + 26]
+    labels = ["00:18 Shenzhou launch", "00:30 Aus CPI 4.9%",
+              "01:38 Balleny M5.9", "07:00 German GDP",
+              "13:30 US PCE + GDP", "18:45 Hera reveal"]
+    for i, ((hour, _old), label) in enumerate(zip(TIMELINE, labels)):
+        ex = x0 + (x1 - x0) * hour / 24.0
+        draw.ellipse([ex - 5, axis_y - 5, ex + 5, axis_y + 5],
+                     fill=RED, outline=WHITE, width=2)
+        lf = font(FB, 10)
+        lw = draw.textlength(label, font=lf)
+        lx = min(max(ex, MARGIN), W - MARGIN - lw)
+        draw.text((lx, rows[i % 3]), label, font=lf, fill=INK)
+    # Antique note: 06:29 WIB = 23:29 UTC 24 Nov, but 25 Nov in Manila
+    note = "Antique quake 06:29 WIB = 23:29 UTC 24 Nov (25 Nov Manila)"
+    nf = font(FR, 10)
+    nw = draw.textlength(note, font=nf)
+    draw.text((W - MARGIN - nw, y0 + 2), note, font=nf, fill=FAINT)
+
+
+# ---- pictogram scenes (simple PIL vector drawings, 30x30 box) ----
+
+def icon_rocket(d, x, y, s=30):
+    d.polygon([(x + s * 0.5, y), (x + s * 0.68, y + s * 0.45),
+               (x + s * 0.5, y + s * 0.62), (x + s * 0.32, y + s * 0.45)],
+              fill=WHITE, outline=INK)
+    d.ellipse([x + s * 0.42, y + s * 0.30, x + s * 0.58, y + s * 0.46], fill=BLUE)
+    d.polygon([(x + s * 0.32, y + s * 0.55), (x + s * 0.18, y + s * 0.78),
+               (x + s * 0.32, y + s * 0.70)], fill=RED)
+    d.polygon([(x + s * 0.68, y + s * 0.55), (x + s * 0.82, y + s * 0.78),
+               (x + s * 0.68, y + s * 0.70)], fill=RED)
+    d.polygon([(x + s * 0.42, y + s * 0.62), (x + s * 0.58, y + s * 0.62),
+               (x + s * 0.50, y + s * 0.95)], fill=ORANGE)
+
+
+def icon_tanker(d, x, y, s=30):
+    d.rectangle([x + 1, y + s * 0.45, x + s - 1, y + s * 0.72], fill=INK)
+    d.rectangle([x + s * 0.68, y + s * 0.28, x + s * 0.88, y + s * 0.45], fill=INK)
+    d.line([x, y + s * 0.82, x + s, y + s * 0.82], fill=BLUE, width=3)
+    d.polygon([(x + s * 0.30, y + s * 0.45), (x + s * 0.42, y + s * 0.12),
+               (x + s * 0.54, y + s * 0.45)], fill=ORANGE)
+    d.polygon([(x + s * 0.45, y + s * 0.45), (x + s * 0.55, y + s * 0.20),
+               (x + s * 0.65, y + s * 0.45)], fill=RED)
+
+
+def icon_refinery(d, x, y, s=30):
+    d.rectangle([x + 2, y + s * 0.45, x + s * 0.42, y + s * 0.95], fill=INK)
+    d.rectangle([x + s * 0.55, y + s * 0.60, x + s * 0.95, y + s * 0.95], fill=INK)
+    d.polygon([(x + s * 0.10, y + s * 0.45), (x + s * 0.16, y + s * 0.10),
+               (x + s * 0.22, y + s * 0.45)], fill=INK)
+    d.polygon([(x + s * 0.28, y + s * 0.45), (x + s * 0.34, y + s * 0.18),
+               (x + s * 0.40, y + s * 0.45)], fill=INK)
+    d.polygon([(x + s * 0.60, y + s * 0.60), (x + s * 0.68, y + s * 0.35),
+               (x + s * 0.76, y + s * 0.60)], fill=ORANGE)
+    d.polygon([(x + s * 0.72, y + s * 0.60), (x + s * 0.80, y + s * 0.42),
+               (x + s * 0.88, y + s * 0.60)], fill=RED)
+
+
+def icon_drone(d, x, y, s=30):
+    d.ellipse([x + s * 0.36, y + s * 0.40, x + s * 0.64, y + s * 0.60], fill=INK)
+    for cx, cy in [(0.12, 0.22), (0.88, 0.22), (0.12, 0.78), (0.88, 0.78)]:
+        px, py = x + s * cx, y + s * cy
+        d.ellipse([px - 5, py - 5, px + 5, py + 5], outline=INK, width=2)
+        d.line([x + s * 0.5, y + s * 0.5, px, py], fill=INK, width=2)
+    d.ellipse([x + s * 0.44, y + s * 0.66, x + s * 0.56, y + s * 0.78], fill=RED)
+
+
+def icon_parliament(d, x, y, s=30):
+    d.polygon([(x + s * 0.08, y + s * 0.42), (x + s * 0.5, y + s * 0.08),
+               (x + s * 0.92, y + s * 0.42)], fill=INK)
+    d.rectangle([x + s * 0.08, y + s * 0.42, x + s * 0.92, y + s * 0.50], fill=INK)
+    for cx in (0.20, 0.38, 0.62, 0.80):
+        d.rectangle([x + s * cx - 2, y + s * 0.52, x + s * cx + 2,
+                     y + s * 0.82], fill=INK)
+    d.rectangle([x + s * 0.05, y + s * 0.82, x + s * 0.95, y + s * 0.92], fill=INK)
+    d.rectangle([x + s * 0.44, y + s * 0.52, x + s * 0.56, y + s * 0.82],
+                fill=WHITE)
+
+
+def icon_chartdown(d, x, y, s=30):
+    d.line([x + 2, y + s * 0.85, x + s - 2, y + s * 0.85], fill=INK, width=2)
+    d.line([x + 2, y + s * 0.85, x + 2, y + s * 0.10], fill=INK, width=2)
+    pts = [(x + 4, y + s * 0.25), (x + s * 0.32, y + s * 0.40),
+           (x + s * 0.55, y + s * 0.32), (x + s * 0.78, y + s * 0.62),
+           (x + s - 3, y + s * 0.78)]
+    d.line(pts, fill=RED, width=3, joint="curve")
+    for px, py in pts:
+        d.ellipse([px - 2, py - 2, px + 2, py + 2], fill=RED)
+    d.polygon([(x + s - 3, y + s * 0.78), (x + s - 10, y + s * 0.70),
+               (x + s - 10, y + s * 0.82)], fill=RED)
+
+
+def icon_handshake(d, x, y, s=30):
+    d.polygon([(x + 2, y + s * 0.45), (x + s * 0.45, y + s * 0.45),
+               (x + s * 0.55, y + s * 0.62), (x + s * 0.35, y + s * 0.80),
+               (x + s * 0.15, y + s * 0.68)], fill=TEAL)
+    d.polygon([(x + s - 2, y + s * 0.45), (x + s * 0.55, y + s * 0.45),
+               (x + s * 0.65, y + s * 0.62), (x + s * 0.85, y + s * 0.68),
+               (x + s * 0.65, y + s * 0.80)], fill=BLUE)
+    d.line([x + s * 0.30, y + s * 0.55, x + s * 0.70, y + s * 0.55],
+           fill=WHITE, width=2)
+
+
+def icon_asteroid(d, x, y, s=30):
+    d.polygon([(x + s * 0.15, y + s * 0.35), (x + s * 0.35, y + s * 0.12),
+               (x + s * 0.70, y + s * 0.15), (x + s * 0.90, y + s * 0.40),
+               (x + s * 0.80, y + s * 0.75), (x + s * 0.45, y + s * 0.92),
+               (x + s * 0.15, y + s * 0.70)], fill=(100, 116, 139))
+    d.ellipse([x + s * 0.30, y + s * 0.30, x + s * 0.48, y + s * 0.48],
+              fill=(71, 85, 105))
+    d.ellipse([x + s * 0.55, y + s * 0.55, x + s * 0.68, y + s * 0.68],
+              fill=(71, 85, 105))
+    for i in range(3):
+        d.line([x + s * (0.55 + i * 0.12), y + s * 0.05,
+                x + s * (0.65 + i * 0.12), y + s * 0.18], fill=YELLOW, width=2)
+
+
+def icon_dollar(d, x, y, s=30):
+    d.ellipse([x + 1, y + 1, x + s - 1, y + s - 1], fill=GREEN)
+    d.text((x + s * 0.30, y + s * 0.10), "$", font=font(FB, 20), fill=WHITE)
+    d.line([x + s * 0.05, y + s * 0.78, x + s * 0.95, y + s * 0.78],
+           fill=GREEN, width=2)
+
+
+def icon_chip(d, x, y, s=30):
+    d.rectangle([x + s * 0.22, y + s * 0.22, x + s * 0.78, y + s * 0.78],
+                fill=INK)
+    d.rectangle([x + s * 0.36, y + s * 0.36, x + s * 0.64, y + s * 0.64],
+                fill=BLUE)
+    for i in range(3):
+        t = s * (0.32 + i * 0.18)
+        d.line([x + t, y + s * 0.05, x + t, y + s * 0.22], fill=INK, width=2)
+        d.line([x + t, y + s * 0.78, x + t, y + s * 0.95], fill=INK, width=2)
+        d.line([x + s * 0.05, y + t, x + s * 0.22, y + t], fill=INK, width=2)
+        d.line([x + s * 0.78, y + t, x + s * 0.95, y + t], fill=INK, width=2)
+
+
+def icon_globe(d, x, y, s=30):
+    d.ellipse([x + 1, y + 1, x + s - 1, y + s - 1], fill=(186, 230, 253),
+              outline=BLUE, width=2)
+    d.ellipse([x + s * 0.38, y + s * 0.38, x + s * 0.62, y + s * 0.62],
+              outline=BLUE, width=1)
+    d.line([x + 1, y + s * 0.5, x + s - 1, y + s * 0.5], fill=BLUE, width=1)
+    d.ellipse([x + s * 0.55, y + s * 0.55, x + s * 0.63, y + s * 0.63], fill=RED)
+    d.ellipse([x + s * 0.45, y + s * 0.45, x + s * 0.73, y + s * 0.73],
+              outline=RED, width=1)
+    d.ellipse([x + s * 0.35, y + s * 0.35, x + s * 0.83, y + s * 0.83],
+              outline=RED, width=1)
+
+
+def icon_shield(d, x, y, s=30):
+    d.polygon([(x + s * 0.5, y + 1), (x + s - 2, y + s * 0.22),
+               (x + s - 2, y + s * 0.55), (x + s * 0.5, y + s - 1),
+               (x + 2, y + s * 0.55), (x + 2, y + s * 0.22)],
+              fill=GREEN)
+    d.line([(x + s * 0.30, y + s * 0.50), (x + s * 0.45, y + s * 0.65),
+            (x + s * 0.72, y + s * 0.35)], fill=WHITE, width=3, joint="curve")
+
+
+ICONS = {
+    "rocket": icon_rocket, "tanker": icon_tanker, "refinery": icon_refinery,
+    "drone": icon_drone, "parliament": icon_parliament,
+    "chartdown": icon_chartdown, "handshake": icon_handshake,
+    "asteroid": icon_asteroid, "dollar": icon_dollar, "chip": icon_chip,
+    "globe": icon_globe, "shield": icon_shield,
+}
+
+# Mini world map: simplified continent blobs in a (x, y, w, h) box.
+# Coordinates are fractions of the box; dots are (lon_frac, lat_frac, region).
+CONTINENTS = [
+    [(0.02, 0.15), (0.10, 0.08), (0.20, 0.10), (0.24, 0.22), (0.18, 0.38),
+     (0.12, 0.45), (0.06, 0.35), (0.02, 0.25)],            # N America
+    [(0.22, 0.55), (0.28, 0.52), (0.31, 0.65), (0.27, 0.85), (0.23, 0.72)],  # S America
+    [(0.46, 0.18), (0.52, 0.12), (0.56, 0.20), (0.52, 0.30), (0.46, 0.28)],  # Europe
+    [(0.47, 0.38), (0.54, 0.34), (0.58, 0.45), (0.55, 0.62), (0.49, 0.58)],  # Africa
+    [(0.58, 0.10), (0.75, 0.06), (0.90, 0.12), (0.95, 0.28), (0.85, 0.38),
+     (0.72, 0.32), (0.62, 0.25)],                            # Asia
+    [(0.82, 0.68), (0.90, 0.66), (0.92, 0.76), (0.84, 0.80)],  # Australia
+]
+MAP_DOTS = [
+    (0.86, 0.22, 0),   # Jiuquan (Shenzhou)
+    (0.60, 0.32, 1),   # Hormuz
+    (0.52, 0.30, 1),   # Gaza
+    (0.53, 0.18, 2),   # Odesa / Samara
+    (0.49, 0.20, 2),   # Berlin
+    (0.88, 0.72, 3),   # Canberra
+    (0.92, 0.25, 3),   # Tokyo
+    (0.09, 0.28, 4),   # Washington
+    (0.24, 0.62, 4),   # Cartagena / Ecuador
+    (0.52, 0.48, 5),   # Sudan
+    (0.68, 0.92, 3),   # Balleny (Southern Ocean)
+    (0.90, 0.35, 3),   # Manila
+]
+REGION_COLORS = [PURPLE, RED, BLUE, TEAL, ORANGE, GREEN]
+
+
+def draw_bands(draw):
+    """Six coloured region bands; one 15px line per story."""
+    y = 146
+    f_title = font(FB, 15)
+    f_detail = font(FR, 15)
+    f_mark = font(FB, 15)
+    f_band = font(FB, 14)
+    line_h = 18
+    band_h = 21
+    for ri, (name, color, _count) in enumerate(REGIONS):
+        # band header: colour bar + name + story count
+        draw.rectangle([0, y, W, y + band_h], fill=color)
+        stories = [s for s in STORIES if s[1] == ri]
+        draw.text((MARGIN, y + 3), name, font=f_band, fill=WHITE)
+        cnt = "%d STORIES" % len(stories)
+        cw = draw.textlength(cnt, font=f_band)
+        draw.text((W - MARGIN - cw, y + 3), cnt, font=f_band, fill=WHITE)
+        y += band_h
+        for (num, _r, title, detail, mark) in stories:
+            # number badge
+            draw.rounded_rectangle([MARGIN, y + 1, MARGIN + 26, y + 16],
+                                   radius=3, fill=color)
+            nb = "%02d" % num
+            nbw = draw.textlength(nb, font=font(FB, 11))
+            draw.text((MARGIN + (26 - nbw) / 2, y + 3), nb,
+                      font=font(FB, 11), fill=WHITE)
+            tx = MARGIN + 32
+            # how-sure mark at the far right
+            mw = draw.textlength(mark, font=f_mark)
+            mx = W - MARGIN - mw
+            mcolor = GREEN if mark == "✓" else (AMBER if mark == "◐"
+                                                 else (RED if mark == "?" else PURPLE))
+            draw.text((mx, y), mark, font=f_mark, fill=mcolor)
+            # title (bold) + detail (regular), truncated to fit
+            tpart = title + " — "
+            tw = draw.textlength(tpart, font=f_title)
+            avail = mx - 8 - (tx + tw)
+            dpart = fit_text(draw, detail, f_detail, avail)
+            draw.text((tx, y), tpart, font=f_title, fill=INK)
+            draw.text((tx + tw, y), dpart, font=f_detail, fill=INK)
+            y += line_h
+        draw.line([0, y, W, y], fill=LINE, width=1)
     return y
 
 
-def panel(draw, box, fill, accent):
-    x0, y0, x1, y1 = box
-    draw.rounded_rectangle(box, radius=10, fill=fill, outline=LINE, width=2)
-    draw.rectangle([x0 + 3, y0, x1 - 3, y0 + 7], fill=accent)
+def draw_map_scenes(draw, y0):
+    """Mini world map (left) + 12 pictogram scenes (right)."""
+    y1 = y0 + 56
+    draw.rectangle([0, y0, W, y1], fill=WHITE)
+    draw.text((MARGIN, y0 + 3), "WORLD MAP", font=font(FB, 11), fill=MUTED)
+    mx, my, mw, mh = MARGIN, y0 + 16, 300, 36
+    for poly in CONTINENTS:
+        pts = [(mx + fx * mw, my + fy * mh) for fx, fy in poly]
+        draw.polygon(pts, fill=(203, 213, 225), outline=(100, 116, 139))
+    for fx, fy, ri in MAP_DOTS:
+        px, py = mx + fx * mw, my + fy * mh
+        draw.ellipse([px - 3, py - 3, px + 3, py + 3],
+                     fill=REGION_COLORS[ri], outline=WHITE, width=1)
+    sx = 340
+    draw.text((sx, y0 + 3), "12 SCENES  —  numbers match the stories",
+              font=font(FB, 11), fill=MUTED)
+    cell = (W - MARGIN - sx) / 12.0
+    for i, (num, kind) in enumerate(SCENES):
+        cx = sx + i * cell
+        ICONS[kind](draw, cx + (cell - 26) / 2, y0 + 16, 26)
+        lab = "%02d" % num
+        lw = draw.textlength(lab, font=font(FB, 9))
+        draw.text((cx + (cell - lw) / 2, y0 + 44), lab,
+                  font=font(FB, 9), fill=MUTED)
+    return y1
 
 
-def pill(draw, x, y, text, fnt, fg, bg):
-    w = int(draw.textlength(text, font=fnt)) + 24
-    h = fnt.size + 14
-    draw.rounded_rectangle([x, y, x + w, y + h], radius=h // 2, fill=bg)
-    draw.text((x + 12, y + 7), text, font=fnt, fill=fg)
-    return w
-
-
-def header(draw):
-    draw.rectangle([0, 0, W, 132], fill=NAVY)
-    draw.text((MARGIN, 28), "THE GLOBAL BRIEF", font=font(FB, 46), fill=WHITE)
-    pill_text = "WEDNESDAY  \u2022  25 NOVEMBER 2026"
-    pf = font(FB, 21)
-    pw = int(draw.textlength(pill_text, font=pf)) + 36
-    px = W - MARGIN - pw
-    draw.rounded_rectangle([px, 36, W - MARGIN, 36 + 42], radius=21, fill=WHITE)
-    draw.text((px + 18, 46), pill_text, font=pf, fill=NAVY)
-    draw.text((MARGIN, 94), "7 WORLD STORIES  \u2022  ALL FROM 25 NOV 2026",
-              font=font(FB, 21), fill=(148, 163, 184))
-
-
-def footer(draw):
-    draw.rectangle([0, 956, W, H], fill=NAVY)
-    draw.text((MARGIN, 974), "ALL STORIES ARE FROM 25 NOV 2026",
-              font=font(FB, 17), fill=WHITE)
-    right = "SCHEDULED MARKED  \u2022  SINGLE-SOURCE FLAGGED"
-    rf = font(FB, 15)
-    rw = draw.textlength(right, font=rf)
-    draw.text((W - MARGIN - rw, 976), right, font=rf, fill=(148, 163, 184))
-
-
-# ---- row 1: heroes (y 144..452) -------------------------------------------
-
-def panel_shenzhou(draw):
-    box = (MARGIN, 144, 584, 452)
-    panel(draw, box, NAVY, BLUE)
-    x, y = 44, 162
-    draw.text((x, y), "SHENZHOU-24 LAUNCH", font=font(FB, 27), fill=WHITE)
-    draw.text((x, 200), "07:18 WIB", font=font(FB, 40), fill=(251, 191, 36))
-    draw.text((x, 248), "1st foreign astronaut", font=font(FB, 22), fill=WHITE)
-    text_block(draw, x, 282,
-               "China launched Shenzhou-24 today, sending Pakistan's "
-               "Muhammad Zeeshan Ali as the first foreign astronaut to "
-               "visit Tiangong.", font(FR, 21), (226, 232, 240), 512, leading=27)
-    # visual band: orbit arc, upright rocket, station silhouette
-    draw.arc([60, 380, 560, 470], start=200, end=340, fill=(100, 116, 139), width=3)
-    # rocket body (upright)
-    draw.rectangle([320, 380, 344, 424], fill=WHITE)
-    draw.polygon([(320, 380), (344, 380), (332, 362)], fill=(251, 191, 36))
-    draw.ellipse([326, 392, 338, 404], fill=BLUE)
-    draw.polygon([(320, 424), (308, 440), (320, 432)], fill=(251, 191, 36))
-    draw.polygon([(344, 424), (356, 440), (344, 432)], fill=(251, 191, 36))
-    # flame
-    draw.polygon([(324, 424), (340, 424), (332, 446)], fill=(249, 115, 22))
-    # station silhouette: small modules
-    draw.rectangle([452, 396, 540, 408], fill=(100, 116, 139))
-    draw.rectangle([488, 384, 506, 420], fill=(148, 163, 184))
-    draw.rectangle([452, 400, 470, 404], fill=(148, 163, 184))
-    draw.text((60, 428), "Jiuquan", font=font(FB, 18), fill=(148, 163, 184))
-    draw.text((420, 428), "Pakistan aboard", font=font(FB, 16), fill=(251, 191, 36))
-
-
-def panel_stocks(draw):
-    box = (596, 144, 1000, 452)
-    panel(draw, box, CREAM, RED)
-    x = 616
-    draw.text((x, 162), "ASIA STOCKS SLIDE", font=font(FB, 26), fill=RED)
-    rows = [("KOSPI", "\u22125.3%"), ("Taiwan", "\u22125.1%"), ("Nikkei", "\u22122.9%")]
-    yy = 202
-    for name, val in rows:
-        draw.text((x, yy), name, font=font(FB, 24), fill=INK)
-        vw = draw.textlength(val, font=font(FB, 24))
-        draw.text((980 - vw, yy), val, font=font(FB, 24), fill=RED)
-        yy += 34
-    text_block(draw, x, 306,
-               "Asian markets tumbled in early Wednesday trading.",
-               font(FR, 19), MUTED, 364, leading=25)
-    # falling line chart
-    pts = [(620, 366), (680, 374), (740, 362), (800, 386), (860, 398), (920, 382),
-           (976, 406)]
-    draw.line(pts, fill=RED, width=4, joint="curve")
-    for px, py in pts:
-        draw.ellipse([px - 4, py - 4, px + 4, py + 4], fill=RED)
-    draw.polygon([(976, 406), (962, 394), (962, 406)], fill=RED)
-    draw.text((x, 420), "MSCI Asia ex-Japan \u22122.3%", font=font(FB, 16), fill=RED)
-
-
-# ---- row 2: support panels (y 464..716) ------------------------------------
-
-def panel_australia(draw):
-    box = (MARGIN, 464, 341, 716)
-    panel(draw, box, WHITE, AMBER)
-    x = 44
-    draw.text((x, 482), "AUSTRALIA CPI 4.9%", font=font(FB, 22), fill=AMBER_DARK)
-    draw.text((x, 514), "4.9%", font=font(FB, 54), fill=INK)
-    # small Australia silhouette (simplified polygon) right of the number
-    draw.polygon([(218, 528), (262, 520), (306, 534), (312, 556), (296, 574),
-                  (268, 580), (240, 570), (220, 552)], fill=(253, 230, 138),
-                 outline=AMBER)
-    draw.text((x, 580), "Core 3.8%", font=font(FB, 21), fill=INK)
-    text_block(draw, x, 612,
-               "Australia's annual inflation rose to 4.9% in October; "
-               "trimmed mean 3.8%.",
-               font(FR, 18), MUTED, 277, leading=24)
-    # house + lightning icons
-    draw.polygon([(52, 700), (72, 684), (92, 700)], fill=AMBER)
-    draw.rectangle([58, 700, 86, 714], fill=AMBER)
-    draw.polygon([(116, 682), (104, 702), (114, 702), (106, 714), (126, 696),
-                  (116, 696)], fill=AMBER)
-
-
-def panel_japan(draw):
-    box = (353, 464, 670, 716)
-    panel(draw, box, WHITE, AMBER)
-    x = 373
-    draw.text((x, 482), "JAPAN SERVICES 4.2%", font=font(FB, 22), fill=AMBER_DARK)
-    draw.text((x, 512), "4.2%", font=font(FB, 48), fill=INK)
-    draw.text((x + 158, 528), "% y/y", font=font(FB, 22), fill=INK)
-    draw.text((x, 576), "Fastest since 1990", font=font(FB, 20), fill=RED)
-    text_block(draw, x, 610,
-               "Service-sector prices rose 4.2% year on year in October, "
-               "up from 3.8% in September.", font(FR, 18), MUTED, 277, leading=24)
-    draw.text((x, 686), "Rate-hike expectations reinforced.",
-              font=font(FB, 15), fill=MUTED)
-
-
-def panel_hera(draw):
-    box = (682, 464, 1000, 716)
-    panel(draw, box, (250, 245, 255), PURPLE)
-    x = 702
-    draw.text((x, 482), "HERA TONIGHT", font=font(FB, 22), fill=PURPLE)
-    draw.text((x, 514), "19:45 CET", font=font(FB, 32), fill=INK)
-    draw.text((x, 552), "01:45 WIB", font=font(FB, 22), fill=MUTED)
-    pill(draw, x, 576, "TONIGHT", font(FB, 17), WHITE, PURPLE)
-    text_block(draw, x, 614,
-               "ESA is set to reveal Hera's first close-up images of "
-               "Dimorphos tonight.", font(FR, 18), MUTED, 278, leading=24)
-    # asteroid + eclipse shadow (top-right corner)
-    draw.ellipse([896, 500, 976, 580], fill=(100, 116, 139))
-    draw.ellipse([920, 516, 952, 548], fill=(71, 85, 105))
-    draw.ellipse([872, 556, 900, 584], fill=(148, 163, 184))
-    draw.text((x, 692), "Scheduled reveal \u2022 Not released yet",
-              font=font(FB, 13), fill=PURPLE)
-
-
-# ---- row 3: wide panels (y 728..944) ----------------------------------------
-
-def panel_balleney(draw):
-    box = (MARGIN, 728, 506, 944)
-    panel(draw, box, WHITE, TEAL)
-    x = 44
-    draw.text((x, 746), "BALLENY M5.9", font=font(FB, 23), fill=TEAL)
-    draw.text((x, 778), "M5.9", font=font(FB, 42), fill=INK)
-    draw.text((x + 128, 788), "08:38 WIB", font=font(FB, 22), fill=INK)
-    draw.text((x + 128, 818), "Depth 10 km", font=font(FB, 20), fill=MUTED)
-    text_block(draw, x, 844,
-               "A shallow M5.9 quake struck the remote Balleny Islands "
-               "region in the Southern Ocean.",
-               font(FR, 18), MUTED, 300, leading=24)
-    # south-pole globe slice with epicentre rings (right side)
-    cx, cy = 420, 844
-    draw.ellipse([cx - 62, cy - 62, cx + 62, cy + 62], fill=(240, 253, 250),
-                 outline=TEAL, width=3)
-    draw.arc([cx - 62, cy - 62, cx + 62, cy + 62], start=180, end=360,
-             fill=TEAL, width=3)
-    draw.ellipse([cx - 26, cy - 26, cx + 26, cy + 26], outline=TEAL, width=2)
-    draw.ellipse([cx - 44, cy - 44, cx + 44, cy + 44], outline=TEAL, width=2)
-    draw.ellipse([cx - 6, cy - 6, cx + 6, cy + 6], fill=RED)
-    pill(draw, 352, 914, "USGS green alert", font(FB, 15), GREEN, GREEN_SOFT)
-    draw.text((x, 916), "Remote ocean \u2022 Low impact", font=font(FB, 15), fill=MUTED)
-
-
-def panel_antique(draw):
-    box = (518, 728, 1000, 944)
-    panel(draw, box, WHITE, ORANGE)
-    x = 538
-    draw.text((x, 746), "ANTIQUE M5.1", font=font(FB, 23), fill=ORANGE)
-    draw.text((x, 778), "M5.1", font=font(FB, 42), fill=INK)
-    draw.text((x + 128, 788), "07:29 PST", font=font(FB, 22), fill=INK)
-    draw.text((x + 128, 818), "Intensity V", font=font(FB, 20), fill=MUTED)
-    text_block(draw, x, 844,
-               "A M5.1 quake hit Antique in the Philippines; PHIVOLCS "
-               "reports Intensity V in Valderrama.",
-               font(FR, 18), MUTED, 300, leading=24)
-    # Philippines archipelago dots + quake rings (right side)
-    cx, cy = 914, 844
-    for dx, dy, r in [(0, -52, 7), (6, -30, 9), (-4, -8, 11), (4, 16, 9),
-                      (-6, 38, 7), (2, 56, 5)]:
-        draw.ellipse([cx + dx - r, cy + dy - r, cx + dx + r, cy + dy + r],
-                     fill=(254, 215, 170), outline=ORANGE)
-    draw.ellipse([cx - 24, cy - 24, cx + 24, cy + 24], outline=RED, width=3)
-    draw.ellipse([cx - 38, cy - 38, cx + 38, cy + 38], outline=RED, width=2)
-    draw.ellipse([cx - 5, cy - 5, cx + 5, cy + 5], fill=RED)
-    # warning triangle
-    draw.polygon([(556, 936), (570, 912), (584, 936)], fill=ORANGE)
-    draw.text((565, 920), "!", font=font(FB, 16), fill=WHITE)
-    pill(draw, 592, 910, "PHIVOLCS ONLY", font(FB, 15), WHITE, ORANGE)
-    draw.text((752, 918), "Single official source", font=font(FB, 15), fill=MUTED)
+def draw_footer(draw, y0):
+    draw.rectangle([0, y0, W, H], fill=NAVY)
+    f1 = font(FB, 13)
+    f2 = font(FR, 12)
+    draw.text((MARGIN, y0 + 5),
+              "DATE CHECK:  Every story happened or was first reported 25 Nov 2026.",
+              font=f1, fill=WHITE)
+    draw.text((MARGIN, y0 + 23),
+              "Not in this picture: Huawei verdict, Riyadh tower strike, COP31 collapse, "
+              "Nvidia CEO return (all 24 Nov or earlier).",
+              font=f2, fill=(203, 213, 225))
 
 
 def render():
     img = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
-    header(draw)
-    panel_shenzhou(draw)
-    panel_stocks(draw)
-    panel_australia(draw)
-    panel_japan(draw)
-    panel_hera(draw)
-    panel_balleney(draw)
-    panel_antique(draw)
-    footer(draw)
+    draw_header(draw)
+    draw_timeline(draw)
+    y = draw_bands(draw)
+    y = draw_map_scenes(draw, y)
+    draw_footer(draw, y)
     return img
 
 
